@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, type ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { InkCanvas } from '../../canvas/InkCanvas';
 import type { Tool } from '../../canvas/InkCanvas';
 import type { Viewport } from '../../canvas/ViewportManager';
@@ -70,6 +71,7 @@ export interface CanvasNoteEditorProps {
   initialNote: NoteElements;
   onNoteChange: (note: NoteElements) => void;
   onNoteTextChange: (text: string) => void;
+  topBarPortalTarget?: HTMLDivElement | null;
 }
 
 export function CanvasNoteEditor({
@@ -77,6 +79,7 @@ export function CanvasNoteEditor({
   initialNote,
   onNoteChange,
   onNoteTextChange,
+  topBarPortalTarget = null,
 }: CanvasNoteEditorProps) {
   const {
     current: currentNote,
@@ -716,6 +719,84 @@ export function CanvasNoteEditor({
     setPaletteIntent(null);
   }, [paletteIntent, setCurrentNote, startElementAnimation]);
 
+  const primaryToolbar = (
+    <div className={`toolbar editor-toolbar ${topBarPortalTarget ? 'toolbar-inline editor-toolbar-inline' : ''}`}>
+      <div className="toolbar-section tool-buttons">
+        <button className={currentTool === 'pen' ? 'active' : ''} onClick={() => setCurrentTool('pen')} title="Pen tool">
+          Pen
+        </button>
+        <button className={currentTool === 'select' ? 'active' : ''} onClick={() => setCurrentTool('select')} title="Select tool">
+          Select
+        </button>
+        <button className={currentTool === 'eraser' ? 'active' : ''} onClick={() => setCurrentTool('eraser')} title="Eraser tool">
+          Erase
+        </button>
+        <button className={currentTool === 'pan' ? 'active' : ''} onClick={() => setCurrentTool('pan')} title="Pan tool">
+          Pan
+        </button>
+        <button onClick={handleAddSketchableImage} title="Add AI sketch canvas">
+          AI Canvas
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      <div className="toolbar-section tool-buttons">
+        <button onClick={undo} disabled={!canUndo} style={{ opacity: canUndo ? 1 : 0.45 }}>
+          Undo
+        </button>
+        <button onClick={redo} disabled={!canRedo} style={{ opacity: canRedo ? 1 : 0.45 }}>
+          Redo
+        </button>
+        <button className={showDebug ? 'active' : ''} onClick={() => setShowDebug((value) => !value)}>
+          Debug
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      <div className="toolbar-section color-picker" style={{ opacity: drawingControlsEnabled ? 1 : 0.4 }}>
+        <div className="color-picker-item" title="Stroke color">
+          <input
+            type="color"
+            value={selectionStrokeColor !== undefined && selectionStrokeColor !== 'mixed'
+              ? colorToHex(selectionStrokeColor)
+              : brushColor}
+            onChange={handleStrokeColorChange}
+            disabled={!drawingControlsEnabled}
+            className={selectionStrokeColor === 'mixed' ? 'mixed-color' : ''}
+          />
+          {selectionStrokeColor === 'mixed' && <span className="mixed-indicator">?</span>}
+        </div>
+        <div className="color-picker-item" title="Background color">
+          <input
+            type="color"
+            value={selectionBackgroundColor !== undefined && selectionBackgroundColor !== 'mixed'
+              ? colorToHex(selectionBackgroundColor)
+              : '#ffffff'}
+            onChange={handleBackgroundColorChange}
+            disabled={!drawingControlsEnabled || !backgroundColorEnabled}
+            className={selectionBackgroundColor === 'mixed' ? 'mixed-color' : ''}
+          />
+          {selectionBackgroundColor === 'mixed' && <span className="mixed-indicator">?</span>}
+        </div>
+      </div>
+
+      <div className="toolbar-section brush-size" style={{ opacity: drawingControlsEnabled ? 1 : 0.4 }}>
+        <input
+          type="range"
+          min="1"
+          max="20"
+          value={brushSize}
+          onChange={(event) => setBrushSize(Number(event.target.value))}
+          title="Brush size"
+          disabled={!drawingControlsEnabled}
+        />
+        <span>{brushSize}</span>
+      </div>
+    </div>
+  );
+
   return (
     <div className="canvas-editor">
       <div className="canvas-container">
@@ -746,81 +827,7 @@ export function CanvasNoteEditor({
         />
       </div>
 
-      <div className="toolbar editor-toolbar">
-        <div className="toolbar-section tool-buttons">
-          <button className={currentTool === 'pen' ? 'active' : ''} onClick={() => setCurrentTool('pen')} title="Pen tool">
-            Pen
-          </button>
-          <button className={currentTool === 'select' ? 'active' : ''} onClick={() => setCurrentTool('select')} title="Select tool">
-            Select
-          </button>
-          <button className={currentTool === 'eraser' ? 'active' : ''} onClick={() => setCurrentTool('eraser')} title="Eraser tool">
-            Erase
-          </button>
-          <button className={currentTool === 'pan' ? 'active' : ''} onClick={() => setCurrentTool('pan')} title="Pan tool">
-            Pan
-          </button>
-          <button onClick={handleAddSketchableImage} title="Add AI sketch canvas">
-            AI Canvas
-          </button>
-        </div>
-
-        <div className="toolbar-divider" />
-
-        <div className="toolbar-section tool-buttons">
-          <button onClick={undo} disabled={!canUndo} style={{ opacity: canUndo ? 1 : 0.45 }}>
-            Undo
-          </button>
-          <button onClick={redo} disabled={!canRedo} style={{ opacity: canRedo ? 1 : 0.45 }}>
-            Redo
-          </button>
-          <button className={showDebug ? 'active' : ''} onClick={() => setShowDebug((value) => !value)}>
-            Debug
-          </button>
-        </div>
-
-        <div className="toolbar-divider" />
-
-        <div className="toolbar-section color-picker" style={{ opacity: drawingControlsEnabled ? 1 : 0.4 }}>
-          <div className="color-picker-item" title="Stroke color">
-            <input
-              type="color"
-              value={selectionStrokeColor !== undefined && selectionStrokeColor !== 'mixed'
-                ? colorToHex(selectionStrokeColor)
-                : brushColor}
-              onChange={handleStrokeColorChange}
-              disabled={!drawingControlsEnabled}
-              className={selectionStrokeColor === 'mixed' ? 'mixed-color' : ''}
-            />
-            {selectionStrokeColor === 'mixed' && <span className="mixed-indicator">?</span>}
-          </div>
-          <div className="color-picker-item" title="Background color">
-            <input
-              type="color"
-              value={selectionBackgroundColor !== undefined && selectionBackgroundColor !== 'mixed'
-                ? colorToHex(selectionBackgroundColor)
-                : '#ffffff'}
-              onChange={handleBackgroundColorChange}
-              disabled={!drawingControlsEnabled || !backgroundColorEnabled}
-              className={selectionBackgroundColor === 'mixed' ? 'mixed-color' : ''}
-            />
-            {selectionBackgroundColor === 'mixed' && <span className="mixed-indicator">?</span>}
-          </div>
-        </div>
-
-        <div className="toolbar-section brush-size" style={{ opacity: drawingControlsEnabled ? 1 : 0.4 }}>
-          <input
-            type="range"
-            min="1"
-            max="20"
-            value={brushSize}
-            onChange={(event) => setBrushSize(Number(event.target.value))}
-            title="Brush size"
-            disabled={!drawingControlsEnabled}
-          />
-          <span>{brushSize}</span>
-        </div>
-      </div>
+      {topBarPortalTarget ? createPortal(primaryToolbar, topBarPortalTarget) : primaryToolbar}
 
       {hasSelectedSketchImage && (
         <div className="toolbar toolbar-secondary editor-secondary-toolbar">

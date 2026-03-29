@@ -5,17 +5,32 @@
 }
 
 .editor-toolbar {
-  top: 14px;
-  left: 18px;
-  transform: none;
+  top: 16px;
+  left: 50%;
   right: auto;
-  max-width: calc(100% - 36px);
+  transform: translateX(-50%);
+  max-width: calc(100% - 28px);
+}
+
+.editor-toolbar-inline {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  transform: none;
+  max-width: none;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  justify-content: center;
 }
 
 .editor-secondary-toolbar {
-  top: 74px;
-  left: 18px;
-  transform: none;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .editor-status-bar {

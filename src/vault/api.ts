@@ -73,6 +73,23 @@ export async function saveNote(note: {
   );
 }
 
+export async function deleteNote(noteId: string): Promise<void> {
+  const response = await fetch(`/api/notes/${noteId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const payload = await response.json();
+      message = String(payload.error ?? payload.message ?? message);
+    } catch {
+      // Ignore JSON parsing errors and keep the status text.
+    }
+    throw new Error(message);
+  }
+}
+
 export async function searchVault(query: string, sourceNoteId?: string): Promise<VaultSearchResponse> {
   const searchParams = new URLSearchParams({ q: query });
   if (sourceNoteId) searchParams.set('sourceNoteId', sourceNoteId);

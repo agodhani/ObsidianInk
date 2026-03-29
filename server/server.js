@@ -4,7 +4,7 @@ import express from 'express';
 import multer from 'multer';
 import { PDFParse } from 'pdf-parse';
 import { Pool } from 'pg';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,6 @@ const uploadDir = path.resolve(rootDir, process.env.LOCAL_UPLOAD_DIR ?? './data/
 const port = Number(process.env.PORT ?? 3001);
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
 const ollamaChatModel = process.env.OLLAMA_CHAT_MODEL ?? 'llama3.1';
-const ollamaEmbedModel = process.env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text';
 const openRouterApiKey = process.env.OPENROUTER_LLMCHAT_API_KEY ?? '';
 const openRouterModel = process.env.OPENROUTER_LLMCHAT_MODEL ?? '';
 
@@ -61,65 +60,113 @@ function chunkText(text, maxLength = 700) {
   return chunks.length > 0 ? chunks : [sanitized.slice(0, maxLength)];
 }
 
-function normalizeEmbedding(values, dims = 256) {
-  const vector = new Array(dims).fill(0);
-  const source = values.length > 0 ? values : [0];
+function normalizeSearchQuery(query) {
+  const phrase = query.trim().toLowerCase().replace(/\s+/g, ' ');
+  const terms = [...new Set(
+    phrase
+      .split(/\s+/)
+      .map((term) => term.replace(/[^a-z0-9]/g, ''))
+      .filter(Boolean),
+  )];
 
-  for (let index = 0; index < dims; index += 1) {
-    vector[index] = Number(source[index % source.length] ?? 0);
+  return { phrase, terms };
+}
+
+function countMatches(haystack, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  let offset = 0;
+
+  while (offset < haystack.length) {
+    const index = haystack.indexOf(needle, offset);
+    if (index === -1) break;
+    count += 1;
+    offset = index + needle.length;
   }
 
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
-  return vector.map((value) => Number((value / magnitude).toFixed(8)));
+  return count;
 }
 
-function hashEmbedding(text, dims = 256) {
-  const vector = new Array(dims).fill(0);
-  const tokens = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
+function buildKeywordSnippet(text, phrase, terms, fallback = 'No text yet.') {
+  const condensed = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!condensed) return fallback;
 
-  for (const token of tokens) {
-    const hash = createHash('sha256').update(token).digest();
-    const slot = hash.readUInt16BE(0) % dims;
-    const direction = hash[2] % 2 === 0 ? 1 : -1;
-    vector[slot] += direction;
-  }
+  const haystack = condensed.toLowerCase();
+  let index = phrase ? haystack.indexOf(phrase) : -1;
 
-  return normalizeEmbedding(vector, dims);
-}
-
-function vectorLiteral(values) {
-  return `[${values.join(',')}]`;
-}
-
-async function createEmbedding(text) {
-  const trimmed = text.trim();
-  if (!trimmed) return hashEmbedding('');
-
-  try {
-    const response = await fetch(`${ollamaBaseUrl}/api/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: ollamaEmbedModel,
-        prompt: trimmed,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Ollama embedding request failed (${response.status})`);
+  if (index === -1) {
+    for (const term of terms) {
+      index = haystack.indexOf(term);
+      if (index !== -1) break;
     }
-
-    const payload = await response.json();
-    const values = Array.isArray(payload.embedding) ? payload.embedding : [];
-    if (values.length === 0) throw new Error('Missing embedding payload');
-    return normalizeEmbedding(values);
-  } catch {
-    return hashEmbedding(trimmed);
   }
+
+  if (index === -1) {
+    return condensed.slice(0, 240);
+  }
+
+  const start = Math.max(0, index - 72);
+  const end = Math.min(condensed.length, index + 168);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < condensed.length ? '...' : '';
+  return `${prefix}${condensed.slice(start, end).trim()}${suffix}`;
+}
+
+function scoreKeywordMatch(title, text, phrase, terms) {
+  const titleLower = String(title ?? '').toLowerCase();
+  const textLower = String(text ?? '').toLowerCase();
+  const exactTitle = phrase ? titleLower === phrase : false;
+  const titlePhrase = phrase ? titleLower.includes(phrase) : false;
+  const textPhrase = phrase ? textLower.includes(phrase) : false;
+
+  let titleTermHits = 0;
+  let textTermHits = 0;
+  for (const term of terms) {
+    if (titleLower.includes(term)) titleTermHits += countMatches(titleLower, term);
+    if (textLower.includes(term)) textTermHits += countMatches(textLower, term);
+  }
+
+  if (!exactTitle && !titlePhrase && !textPhrase && titleTermHits === 0 && textTermHits === 0) {
+    return null;
+  }
+
+  return (
+    (exactTitle ? 240 : 0) +
+    (titlePhrase ? 140 : 0) +
+    (textPhrase ? 90 : 0) +
+    titleTermHits * 24 +
+    textTermHits * 10
+  );
+}
+
+function keywordSearch(records, {
+  titleKey,
+  textKey,
+  phrase,
+  terms,
+  limit = 12,
+  fallbackSnippet,
+}) {
+  return records
+    .map((record) => {
+      const title = String(record[titleKey] ?? '');
+      const text = String(record[textKey] ?? '');
+      const score = scoreKeywordMatch(title, text, phrase, terms);
+      if (score === null) return null;
+
+      return {
+        id: record.id,
+        title,
+        snippet: buildKeywordSnippet(text, phrase, terms, fallbackSnippet),
+        score,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.title.localeCompare(right.title);
+    })
+    .slice(0, limit);
 }
 
 async function answerWithOllama(question, context) {
@@ -199,11 +246,10 @@ async function reindexNote(noteId, noteText) {
 
   for (let index = 0; index < chunks.length; index += 1) {
     const content = chunks[index];
-    const embedding = await createEmbedding(content);
     await pool.query(
-      `INSERT INTO note_chunks (id, note_id, chunk_index, content, embedding)
-       VALUES ($1, $2, $3, $4, $5::vector)`,
-      [randomUUID(), noteId, index, content, vectorLiteral(embedding)],
+      `INSERT INTO note_chunks (id, note_id, chunk_index, content)
+       VALUES ($1, $2, $3, $4)`,
+      [randomUUID(), noteId, index, content],
     );
   }
 }
@@ -214,11 +260,10 @@ async function reindexDocument(documentId, text) {
 
   for (let index = 0; index < chunks.length; index += 1) {
     const content = chunks[index];
-    const embedding = await createEmbedding(content);
     await pool.query(
-      `INSERT INTO document_chunks (id, document_id, chunk_index, content, embedding)
-       VALUES ($1, $2, $3, $4, $5::vector)`,
-      [randomUUID(), documentId, index, content, vectorLiteral(embedding)],
+      `INSERT INTO document_chunks (id, document_id, chunk_index, content)
+       VALUES ($1, $2, $3, $4)`,
+      [randomUUID(), documentId, index, content],
     );
   }
 }
@@ -278,98 +323,49 @@ async function searchVault(query, sourceNoteId) {
   const trimmed = query.trim();
   if (!trimmed) return { notes: [], documents: [] };
 
-  const embedding = vectorLiteral(await createEmbedding(trimmed));
-  const noteParams = [trimmed, `%${trimmed}%`, embedding];
-  const documentParams = [trimmed, `%${trimmed}%`, embedding];
-  if (sourceNoteId) noteParams.push(sourceNoteId);
-
-  const noteFilter = sourceNoteId ? 'AND n.id <> $4' : '';
-  const notesPromise = pool.query(
+  const { phrase, terms } = normalizeSearchQuery(trimmed);
+  const notePromise = sourceNoteId
+    ? pool.query(
+      `
+        SELECT id, title, note_text AS "noteText"
+        FROM notes
+        WHERE id <> $1
+      `,
+      [sourceNoteId],
+    )
+    : pool.query(
+      `
+        SELECT id, title, note_text AS "noteText"
+        FROM notes
+      `,
+    );
+  const documentPromise = pool.query(
     `
-      WITH lexical AS (
-        SELECT
-          n.id,
-          n.title,
-          LEFT(n.note_text, 240) AS snippet,
-          CASE
-            WHEN lower(n.title) = lower($1) THEN 1.0
-            WHEN n.title ILIKE $2 THEN 0.85
-            WHEN n.note_text ILIKE $2 THEN 0.72
-            ELSE 0.35
-          END AS score
-        FROM notes n
-        WHERE (n.title ILIKE $2 OR n.note_text ILIKE $2) ${noteFilter}
-        LIMIT 10
-      ),
-      semantic AS (
-        SELECT
-          n.id,
-          n.title,
-          nc.content AS snippet,
-          GREATEST(0.1, 1 - (nc.embedding <=> $3::vector)) AS score
-        FROM note_chunks nc
-        JOIN notes n ON n.id = nc.note_id
-        WHERE nc.embedding IS NOT NULL ${sourceNoteId ? 'AND n.id <> $4' : ''}
-        ORDER BY nc.embedding <=> $3::vector ASC
-        LIMIT 10
-      )
-      SELECT id, title, snippet, MAX(score) AS score
-      FROM (
-        SELECT * FROM lexical
-        UNION ALL
-        SELECT * FROM semantic
-      ) ranked
-      GROUP BY id, title, snippet
-      ORDER BY score DESC, lower(title) ASC
-      LIMIT 12
+      SELECT id, name, extracted_text AS "extractedText"
+      FROM documents
     `,
-    noteParams,
   );
 
-  const documentsPromise = pool.query(
-    `
-      WITH lexical AS (
-        SELECT
-          d.id,
-          d.name AS title,
-          LEFT(d.extracted_text, 240) AS snippet,
-          CASE
-            WHEN lower(d.name) = lower($1) THEN 1.0
-            WHEN d.name ILIKE $2 THEN 0.82
-            WHEN d.extracted_text ILIKE $2 THEN 0.7
-            ELSE 0.3
-          END AS score
-        FROM documents d
-        WHERE d.name ILIKE $2 OR d.extracted_text ILIKE $2
-        LIMIT 10
-      ),
-      semantic AS (
-        SELECT
-          d.id,
-          d.name AS title,
-          dc.content AS snippet,
-          GREATEST(0.1, 1 - (dc.embedding <=> $3::vector)) AS score
-        FROM document_chunks dc
-        JOIN documents d ON d.id = dc.document_id
-        WHERE dc.embedding IS NOT NULL
-        ORDER BY dc.embedding <=> $3::vector ASC
-        LIMIT 10
-      )
-      SELECT id, title, snippet, MAX(score) AS score
-      FROM (
-        SELECT * FROM lexical
-        UNION ALL
-        SELECT * FROM semantic
-      ) ranked
-      GROUP BY id, title, snippet
-      ORDER BY score DESC, lower(title) ASC
-      LIMIT 12
-    `,
-    documentParams,
-  );
+  const [noteResult, documentResult] = await Promise.all([notePromise, documentPromise]);
 
-  const [notesResult, documentsResult] = await Promise.all([notesPromise, documentsPromise]);
-  return { notes: notesResult.rows, documents: documentsResult.rows };
+  return {
+    notes: keywordSearch(noteResult.rows, {
+      titleKey: 'title',
+      textKey: 'noteText',
+      phrase,
+      terms,
+      limit: 12,
+      fallbackSnippet: 'Empty note',
+    }),
+    documents: keywordSearch(documentResult.rows, {
+      titleKey: 'name',
+      textKey: 'extractedText',
+      phrase,
+      terms,
+      limit: 12,
+      fallbackSnippet: 'No extracted text yet.',
+    }),
+  };
 }
 
 app.get('/api/health', async (_request, response) => {
@@ -489,6 +485,16 @@ app.put('/api/notes/:noteId', async (request, response) => {
     noteCanvas,
     noteText,
   });
+});
+
+app.delete('/api/notes/:noteId', async (request, response) => {
+  const result = await pool.query('DELETE FROM notes WHERE id = $1', [request.params.noteId]);
+  if (result.rowCount === 0) {
+    response.status(404).json({ error: 'Note not found' });
+    return;
+  }
+
+  response.status(204).send();
 });
 
 app.get('/api/wiki-links', async (request, response) => {
