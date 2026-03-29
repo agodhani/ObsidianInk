@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'INK_')
   const recognitionApiUrl = env.INK_RECOGNITION_API_URL || 'http://localhost:8080'
+  const appApiUrl = process.env.OBSIDIANINK_API_URL || 'http://localhost:3001'
 
   return {
     envPrefix: 'INK_',
@@ -15,6 +16,10 @@ export default defineConfig(({ mode }) => {
           target: recognitionApiUrl,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/recognition/, ''),
+        },
+        '/api': {
+          target: appApiUrl,
+          changeOrigin: true,
         },
       },
     },

@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 .env.local
+data/
 
 # One-off scripts with local paths
 presentation/make_tokenization_viz.py
