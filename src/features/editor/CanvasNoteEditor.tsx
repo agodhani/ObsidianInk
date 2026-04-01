@@ -343,12 +343,12 @@ export function CanvasNoteEditor({
       if (result.strokesConsumed.length > 0) {
         setStrokesToClearFromOverlay({ strokes: result.strokesConsumed, requestId: Date.now() });
       }
-      setCurrentNote({
-        ...currentNoteRef.current,
-        elements: currentNoteRef.current.elements.map((entry) => (
+      setCurrentNote((prev) => ({
+        ...prev,
+        elements: prev.elements.map((entry) => (
           entry.id === elementId ? result.element : entry
         )),
-      });
+      }));
       setSelectedElementIds(new Set([elementId]));
       return;
     }
@@ -368,10 +368,10 @@ export function CanvasNoteEditor({
         if (intent.entries.length > 0) {
           setPaletteIntent(intent);
           const strokeElement = createStrokeElement(rectXResult.allStrokes);
-          setCurrentNote({
-            ...currentNoteRef.current,
-            elements: [...currentNoteRef.current.elements, strokeElement],
-          });
+          setCurrentNote((prev) => ({
+            ...prev,
+            elements: [...prev.elements, strokeElement],
+          }));
           const consumedSet = new Set(rectXResult.allStrokes);
           pendingStrokesRef.current = pendingStrokesRef.current.filter((stroke) => !consumedSet.has(stroke));
           return;
@@ -396,10 +396,10 @@ export function CanvasNoteEditor({
           if (disambigResult.needsDisambiguation && disambigResult.candidates) {
             setDisambiguationIntent(createDisambiguationIntent(disambigResult.candidates, result.consumedStrokes));
             const strokeElement = createStrokeElement(result.consumedStrokes);
-            setCurrentNote({
-              ...currentNoteRef.current,
-              elements: [...currentNoteRef.current.elements, strokeElement],
-            });
+            setCurrentNote((prev) => ({
+              ...prev,
+              elements: [...prev.elements, strokeElement],
+            }));
             const consumedSet = new Set(result.consumedStrokes);
             pendingStrokesRef.current = pendingStrokesRef.current.filter((stroke) => !consumedSet.has(stroke));
             return;
@@ -411,13 +411,11 @@ export function CanvasNoteEditor({
             logElementCreated(element.type, element.id, `confidence: ${result.confidence.toFixed(2)}`);
           }
           startElementAnimation(result.elements.map((element) => element.id));
-          const latestElements = currentNoteRef.current.elements;
           const consumedIds = result.consumedElementIds ? new Set(result.consumedElementIds) : null;
-          const surviving = removeConsumedStrokeElements(latestElements, consumedSet)
-            .filter((element) => !consumedIds || !consumedIds.has(element.id));
-          setCurrentNote({
-            ...currentNoteRef.current,
-            elements: [...surviving, ...result.elements],
+          setCurrentNote((prev) => {
+            const surviving = removeConsumedStrokeElements(prev.elements, consumedSet)
+              .filter((element) => !consumedIds || !consumedIds.has(element.id));
+            return { ...prev, elements: [...surviving, ...result.elements] };
           });
           return;
         }
@@ -448,10 +446,10 @@ export function CanvasNoteEditor({
               logElementCreated(element.type, element.id, `confidence: ${result.confidence.toFixed(2)}`);
             }
             startElementAnimation(result.elements.map((element) => element.id));
-            setCurrentNote({
-              ...currentNoteRef.current,
-              elements: [...removeConsumedStrokeElements(currentNoteRef.current.elements, consumedSet), ...result.elements],
-            });
+            setCurrentNote((prev) => ({
+              ...prev,
+              elements: [...removeConsumedStrokeElements(prev.elements, consumedSet), ...result.elements],
+            }));
             return;
           }
         } catch (error) {
@@ -482,10 +480,10 @@ export function CanvasNoteEditor({
               logElementCreated(element.type, element.id, `confidence: ${result.confidence.toFixed(2)}`);
             }
             startElementAnimation(result.elements.map((element) => element.id));
-            setCurrentNote({
-              ...currentNoteRef.current,
-              elements: [...removeConsumedStrokeElements(currentNoteRef.current.elements, consumedSet), ...result.elements],
-            });
+            setCurrentNote((prev) => ({
+              ...prev,
+              elements: [...removeConsumedStrokeElements(prev.elements, consumedSet), ...result.elements],
+            }));
             return;
           }
         } catch (error) {
@@ -498,10 +496,10 @@ export function CanvasNoteEditor({
       debugLog.warn('RectX detection failed', { reason: rectXRejection, pendingStrokes: pendingStrokesRef.current.length });
     }
     const strokeElement = createStrokeElement(strokes);
-    setCurrentNote({
-      ...currentNoteRef.current,
-      elements: [...currentNoteRef.current.elements, strokeElement],
-    });
+    setCurrentNote((prev) => ({
+      ...prev,
+      elements: [...prev.elements, strokeElement],
+    }));
   }, [setCurrentNote, startElementAnimation]);
 
   const handleDrawingStart = useCallback(() => {
@@ -518,12 +516,12 @@ export function CanvasNoteEditor({
       if (result.strokesConsumed.length > 0) {
         setStrokesToClearFromOverlay({ strokes: result.strokesConsumed, requestId: Date.now() });
       }
-      setCurrentNote({
-        ...currentNoteRef.current,
-        elements: currentNoteRef.current.elements.map((entry) => (
+      setCurrentNote((prev) => ({
+        ...prev,
+        elements: prev.elements.map((entry) => (
           entry.id === elementId ? result.element : entry
         )),
-      });
+      }));
       setSelectedElementIds(new Set([elementId]));
       return;
     }
@@ -548,10 +546,10 @@ export function CanvasNoteEditor({
             logElementMutated(element.type, element.id, 'Partial token erasure');
           }
           setStrokesToClearFromOverlay({ strokes: strokesToProcess, requestId: Date.now() });
-          setCurrentNote({
-            ...currentNoteRef.current,
+          setCurrentNote((prev) => ({
+            ...prev,
             elements: result.remainingElements,
-          });
+          }));
         }
         return;
       }
@@ -561,10 +559,10 @@ export function CanvasNoteEditor({
         const lassoResult = findElementsInLasso(getStrokePoints(lassoStroke), latestElements, lassoStroke);
         if (lassoResult.isValid && lassoResult.selectedElements.length > 0) {
           const lassoElement = createStrokeElement(strokesToProcess);
-          setCurrentNote({
-            ...currentNoteRef.current,
-            elements: [...currentNoteRef.current.elements, lassoElement],
-          });
+          setCurrentNote((prev) => ({
+            ...prev,
+            elements: [...prev.elements, lassoElement],
+          }));
           setSelectionIntent(createSelectionIntent(
             strokesToProcess,
             lassoElement.id,

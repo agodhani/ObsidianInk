@@ -8,6 +8,8 @@ import type { InteractionResult } from '../registry/ElementPlugin';
 import { getStrokesBoundingBox } from '../registry/ElementRegistry';
 import type { HandwritingRecognitionResult, RecognizedToken } from '../../recognition/RecognitionService';
 import { getRecognitionService } from '../../recognition/RecognitionService';
+import { applyLocalNoteStructure, buildInkTextMirrorText } from './noteStructure';
+import { enhanceNoteStructureWithVision } from './noteStructureVision';
 
 // How close strokes need to be to be considered part of the same text
 const PROXIMITY_THRESHOLD = 100; // pixels
@@ -267,6 +269,18 @@ function mergeRecognitionResult(
     ...element,
     lines: newLines,
     sourceStrokes: [...element.sourceStrokes, ...newStrokes],
+    mirrorText: undefined,
+  };
+}
+
+async function finalizeStructuredElement(element: InkTextElement): Promise<InkTextElement> {
+  const structuredLines = applyLocalNoteStructure(element.lines);
+  const { lines, mirrorText } = await enhanceNoteStructureWithVision(element.sourceStrokes, structuredLines);
+
+  return {
+    ...element,
+    lines,
+    mirrorText: mirrorText || buildInkTextMirrorText(lines),
   };
 }
 
@@ -325,7 +339,8 @@ export async function acceptInk(
   }
 
   // Merge the new strokes and recognition into the element
-  const newElement = mergeRecognitionResult(element, strokes, result);
+  const mergedElement = mergeRecognitionResult(element, strokes, result);
+  const newElement = await finalizeStructuredElement(mergedElement);
 
   return {
     element: newElement,

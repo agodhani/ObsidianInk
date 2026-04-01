@@ -3,6 +3,7 @@ import './App.css';
 import { createEmptyNote, type NoteElements } from './types';
 import { Toaster } from './toast/Toast';
 import { CanvasNoteEditor } from './features/editor/CanvasNoteEditor';
+import { ResearchHandwritingPad, type ResearchHandwritingPadHandle } from './features/research/ResearchHandwritingPad';
 import {
   createFolder,
   createNote,
@@ -29,6 +30,15 @@ import type {
 } from './vault/types';
 
 type InspectorTab = 'mirror' | 'search' | 'research' | 'links';
+
+function appendResearchChunk(currentText: string, nextChunk: string): string {
+  const trimmedChunk = nextChunk.trim();
+  if (!trimmedChunk) return currentText;
+  if (!currentText.trim()) return trimmedChunk;
+
+  const separator = /\s$/.test(currentText) || /^[,.;:!?)]/.test(trimmedChunk) ? '' : ' ';
+  return `${currentText}${separator}${trimmedChunk}`;
+}
 
 function noteSnapshot(note: {
   id: string;
@@ -210,8 +220,18 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [toolbarPortalTarget, setToolbarPortalTarget] = useState<HTMLDivElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const researchHandwritingPadRef = useRef<ResearchHandwritingPadHandle | null>(null);
+  const researchQueryRef = useRef('');
   const lastSavedSnapshotRef = useRef<string>('');
   const lastLoadedNoteIdRef = useRef<string | null>(null);
+
+  const updateResearchQuery = useCallback((nextValue: string | ((previous: string) => string)) => {
+    setResearchQuery((previous) => {
+      const resolved = typeof nextValue === 'function' ? nextValue(previous) : nextValue;
+      researchQueryRef.current = resolved;
+      return resolved;
+    });
+  }, []);
 
   const resetCurrentNote = useCallback(() => {
     lastLoadedNoteIdRef.current = null;
@@ -358,9 +378,13 @@ function App() {
 
   useEffect(() => {
     if (!researchQuery && researchPrompts[0]) {
-      setResearchQuery(researchPrompts[0]);
+      updateResearchQuery(researchPrompts[0]);
     }
-  }, [researchPrompts, researchQuery]);
+  }, [researchPrompts, researchQuery, updateResearchQuery]);
+
+  useEffect(() => {
+    researchQueryRef.current = researchQuery;
+  }, [researchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -515,10 +539,14 @@ function App() {
   }, []);
 
   const handleRunResearch = useCallback(async () => {
-    if (!researchQuery.trim()) return;
+    await researchHandwritingPadRef.current?.flushPendingInk();
+
+    const question = researchQueryRef.current.trim();
+    if (!question) return;
+
     setIsResearching(true);
     try {
-      const result = await researchQuestion(researchQuery, currentNoteId ?? undefined);
+      const result = await researchQuestion(question, currentNoteId ?? undefined);
       setResearchResult(result);
       setIsInspectorVisible(true);
       setInspectorTab('research');
@@ -527,7 +555,11 @@ function App() {
     } finally {
       setIsResearching(false);
     }
-  }, [currentNoteId, researchQuery]);
+  }, [currentNoteId]);
+
+  const handleAppendResearchText = useCallback((recognizedText: string) => {
+    updateResearchQuery((previous) => appendResearchChunk(previous, recognizedText));
+  }, [updateResearchQuery]);
 
   const toggleInspectorTab = useCallback((tab: InspectorTab) => {
     if (isInspectorVisible && inspectorTab === tab) {
@@ -798,17 +830,24 @@ function App() {
                       {isResearching ? 'Thinking...' : 'Ask'}
                     </button>
                   </div>
-                  <textarea
-                    className="panel-textarea"
-                    value={researchQuery}
-                    onChange={(event) => setResearchQuery(event.target.value)}
-                    placeholder="Write a ??? question here or tap a detected prompt below."
-                  />
+                  <div className="research-input-stack">
+                    <ResearchHandwritingPad
+                      ref={researchHandwritingPadRef}
+                      preContext={researchQuery}
+                      onAppendText={handleAppendResearchText}
+                    />
+                    <textarea
+                      className="panel-textarea"
+                      value={researchQuery}
+                      onChange={(event) => updateResearchQuery(event.target.value)}
+                      placeholder="Type here, or use the ink pad above, to ask a research question."
+                    />
+                  </div>
 
                   {researchPrompts.length > 0 && (
                     <div className="chip-row">
                       {researchPrompts.map((prompt) => (
-                        <button key={prompt} className="chip" onClick={() => setResearchQuery(prompt)}>
+                        <button key={prompt} className="chip" onClick={() => updateResearchQuery(prompt)}>
                           {prompt}
                         </button>
                       ))}

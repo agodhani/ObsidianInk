@@ -12,9 +12,19 @@ export interface InkTextToken {
   confidence?: number;
 }
 
+export type InkTextLineKind = 'paragraph' | 'bullet' | 'ordered' | 'checklist' | 'heading' | 'unknown';
+export type InkTextCheckState = 'checked' | 'unchecked' | 'indeterminate' | 'none';
+
 export interface InkTextLine {
   tokens: InkTextToken[];
   baseline: number;
+  kind?: InkTextLineKind;
+  markerText?: string;
+  indentLevel?: number;
+  order?: number;
+  checkState?: InkTextCheckState;
+  structureConfidence?: number;
+  serializedText?: string;
 }
 
 export interface InkTextElement extends TransformableElement {
@@ -23,4 +33,5 @@ export interface InkTextElement extends TransformableElement {
   sourceStrokes: Stroke[];
   layoutWidth?: number; // Width for text wrapping
   writingAngle?: number; // Estimated writing angle in radians
+  mirrorText?: string;
 }

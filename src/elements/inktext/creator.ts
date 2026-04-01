@@ -9,6 +9,8 @@ import type { CreationContext, CreationResult } from '../registry/ElementPlugin'
 import type { HandwritingRecognitionResult, RecognizedToken } from '../../recognition/RecognitionService';
 import { getRecognitionService } from '../../recognition/RecognitionService';
 import { debugLog } from '../../debug/DebugLogger';
+import { applyLocalNoteStructure, buildInkTextMirrorText } from './noteStructure';
+import { enhanceNoteStructureWithVision } from './noteStructureVision';
 
 // Validation constants
 const MIN_STROKES = 1;
@@ -169,6 +171,21 @@ function convertTokens(
   });
 }
 
+function estimateBaselineFromTokens(
+  tokens: InkTextToken[],
+  fallbackTop: number,
+  fallbackHeight: number
+): number {
+  if (tokens.length === 0) {
+    return fallbackTop + fallbackHeight * 0.8;
+  }
+
+  const bottoms = tokens.map((token) => token.quad.bottomLeft.y);
+  const heights = tokens.map((token) => token.quad.bottomLeft.y - token.quad.topLeft.y);
+  const avgHeight = heights.reduce((sum, height) => sum + height, 0) / heights.length;
+  return Math.max(...bottoms) - avgHeight * 0.2;
+}
+
 /**
  * Convert recognition result to InkTextLines.
  */
@@ -202,10 +219,12 @@ function convertToInkTextLines(
   return result.lines.map((line, lineIndex) => {
     // Estimate baseline for this line (bottom - 20% of line height)
     const lineTop = strokesBounds.top + lineIndex * lineHeight;
-    const baseline = lineTop + lineHeight * 0.8;
+    const fallbackBaseline = lineTop + lineHeight * 0.8;
+    const tokens = convertTokens(line.tokens, strokes, fallbackBaseline);
+    const baseline = estimateBaselineFromTokens(tokens, lineTop, lineHeight);
 
     return {
-      tokens: convertTokens(line.tokens, strokes, baseline),
+      tokens,
       baseline,
     };
   });
@@ -216,9 +235,9 @@ function convertToInkTextLines(
  */
 function createInkTextElement(
   strokes: Stroke[],
-  result: HandwritingRecognitionResult
+  lines: InkTextLine[],
+  mirrorText: string
 ): InkTextElement {
-  const lines = convertToInkTextLines(result, strokes);
   const writingAngle = estimateWritingAngle(strokes);
   const bounds = getStrokesBounds(strokes);
 
@@ -230,6 +249,7 @@ function createInkTextElement(
     sourceStrokes: strokes,
     layoutWidth: bounds ? bounds.right - bounds.left : undefined,
     writingAngle,
+    mirrorText,
   };
 }
 
@@ -355,8 +375,10 @@ export async function createFromInk(
     combinedConfidence: combinedConfidence.toFixed(2),
   });
 
-  // Create the element
-  const element = createInkTextElement(strokes, result);
+  const rawLines = convertToInkTextLines(result, strokes);
+  const structuredLines = applyLocalNoteStructure(rawLines);
+  const { lines, mirrorText } = await enhanceNoteStructureWithVision(strokes, structuredLines);
+  const element = createInkTextElement(strokes, lines, mirrorText || buildInkTextMirrorText(lines));
   const finalConfidence = Math.min(combinedConfidence, MAX_INKTEXT_CONFIDENCE);
 
   // If confidence is below the direct-creation threshold but above disambiguation minimum,

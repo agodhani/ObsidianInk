@@ -1,5 +1,6 @@
 import type { InkTextElement } from '../elements/inktext/types';
 import type { Element, NoteElements } from '../types';
+import { buildInkTextMirrorText } from '../elements/inktext/noteStructure';
 
 export interface WikiLinkToken {
   rawText: string;
@@ -24,10 +25,7 @@ function getElementPosition(element: Element): { x: number; y: number } {
 }
 
 function serializeInkText(element: InkTextElement): string {
-  return element.lines
-    .map((line) => line.tokens.map((token) => token.text).join(' ').trim())
-    .filter(Boolean)
-    .join('\n');
+  return element.mirrorText?.trim() || buildInkTextMirrorText(element.lines);
 }
 
 export function extractNoteTextMirror(note: NoteElements): string {

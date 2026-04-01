@@ -112,6 +112,31 @@ function buildKeywordSnippet(text, phrase, terms, fallback = 'No text yet.') {
   return `${prefix}${condensed.slice(start, end).trim()}${suffix}`;
 }
 
+function selectRelevantChunks(text, phrase, terms, limit = 2) {
+  const chunks = chunkText(text, 520);
+  if (chunks.length === 0) return [];
+
+  const scoredChunks = chunks
+    .map((chunk, index) => ({
+      chunk,
+      index,
+      score: scoreKeywordMatch('', chunk, phrase, terms) ?? (index === 0 ? 1 : 0),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.index - right.index;
+    })
+    .slice(0, limit)
+    .sort((left, right) => left.index - right.index);
+
+  if (scoredChunks.length === 0) {
+    return chunks.slice(0, 1);
+  }
+
+  return scoredChunks.map((entry) => entry.chunk);
+}
+
 function scoreKeywordMatch(title, text, phrase, terms) {
   const titleLower = String(title ?? '').toLowerCase();
   const textLower = String(text ?? '').toLowerCase();
@@ -598,7 +623,42 @@ app.post('/api/research', async (request, response) => {
     return;
   }
 
+  const { phrase, terms } = normalizeSearchQuery(question);
   const searchResults = await searchVault(question, sourceNoteId);
+  let sourceNoteSource = null;
+  let sourceNoteContext = '';
+
+  if (sourceNoteId) {
+    const sourceNoteResult = await pool.query(
+      `
+        SELECT id, title, note_text AS "noteText"
+        FROM notes
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [sourceNoteId],
+    );
+
+    const sourceNote = sourceNoteResult.rows[0];
+    if (sourceNote) {
+      const noteText = String(sourceNote.noteText ?? '').trim();
+      const relevantChunks = selectRelevantChunks(noteText, phrase, terms, 2);
+      sourceNoteContext = relevantChunks.join('\n\n') || 'No mirrored handwritten note text is available yet for the current note.';
+      sourceNoteSource = {
+        kind: 'note',
+        id: sourceNote.id,
+        title: `${sourceNote.title} (current note)`,
+        snippet: buildKeywordSnippet(
+          noteText,
+          phrase,
+          terms,
+          'Current note has no mirrored handwritten text yet.',
+        ),
+        score: 1000,
+      };
+    }
+  }
+
   const noteSources = searchResults.notes.slice(0, 4).map((item) => ({
     kind: 'note',
     id: item.id,
@@ -613,12 +673,18 @@ app.post('/api/research', async (request, response) => {
     snippet: item.snippet,
     score: Number(item.score),
   }));
-  const sources = [...noteSources, ...documentSources]
+  const retrievedSources = [...noteSources, ...documentSources]
     .sort((left, right) => right.score - left.score)
-    .slice(0, 6);
+    .slice(0, sourceNoteSource ? 5 : 6);
+  const sources = sourceNoteSource ? [sourceNoteSource, ...retrievedSources] : retrievedSources;
 
   const context = sources
-    .map((source, index) => `[${index + 1}] ${source.title}\n${source.snippet}`)
+    .map((source, index) => {
+      if (sourceNoteSource && source.id === sourceNoteSource.id) {
+        return `[${index + 1}] ${source.title}\n${sourceNoteContext}`;
+      }
+      return `[${index + 1}] ${source.title}\n${source.snippet}`;
+    })
     .join('\n\n');
 
   let answer = '';

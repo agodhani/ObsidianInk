@@ -16,12 +16,13 @@ import {
 import { polygonArea, polygonCentroid } from './polygon';
 import { debugLog } from '../debug/DebugLogger';
 
-// Configuration constants
-const CLOSURE_GAP_RATIO = 0.15; // 15% of perimeter
-const CIRCLE_COMPACTNESS_THRESHOLD = 0.75;
-const CIRCLE_RADIUS_VARIANCE_MAX = 0.25;
-const CIRCLE_MAX_CORNERS = 5; // Circles may have several detected corners due to hand-drawn wobble
-const RECTANGLE_ANGLE_TOLERANCE = Math.PI / 12; // 15 degrees
+// Configuration constants — tuned for tablet / stylus hand-drawing where
+// shapes are rarely perfectly closed or perfectly angular.
+const CLOSURE_GAP_RATIO = 0.22; // 22% of perimeter (was 15% — tablet strokes often leave a small gap)
+const CIRCLE_COMPACTNESS_THRESHOLD = 0.72; // slightly relaxed from 0.75
+const CIRCLE_RADIUS_VARIANCE_MAX = 0.30; // relaxed from 0.25 — allows more oval-ish circles
+const CIRCLE_MAX_CORNERS = 6; // was 5 — slightly more tolerance for hand wobble
+const RECTANGLE_ANGLE_TOLERANCE = Math.PI / 8; // 22.5 degrees (was 15°) — hand-drawn corners often skew
 const MIN_CONFIDENCE = 0.70;
 
 // Bezier magic number for approximating circles with cubic beziers

@@ -4,6 +4,7 @@ import type { Offset, Element, Stroke } from '../types';
 import type { InkTextElement, InkTextLine, InkTextToken } from '../elements/inktext/types';
 import type { CoordinatePlaneElement } from '../elements/coordinateplane/types';
 import { computeConcaveHull, getHullBounds, simplifyPoints } from '../geometry/concaveHull';
+import { applyLocalNoteStructure, buildInkTextMirrorText } from '../elements/inktext/noteStructure';
 import {
   calculateElementOverlap,
   calculateInkTextTokenOverlaps,
@@ -108,10 +109,12 @@ function applyPartialInkTextErase(
   }
 
   // Return modified element with remaining tokens and re-indexed strokes
+  const structuredLines = applyLocalNoteStructure(newLines);
   return {
     ...element,
-    lines: newLines,
+    lines: structuredLines,
     sourceStrokes: newSourceStrokes,
+    mirrorText: buildInkTextMirrorText(structuredLines),
   };
 }
 

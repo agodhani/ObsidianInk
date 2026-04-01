@@ -6,7 +6,7 @@ export interface UndoRedoState<T> {
   current: T;
   canUndo: boolean;
   canRedo: boolean;
-  set: (value: T) => void;
+  set: (value: T | ((prev: T) => T)) => void;
   undo: () => void;
   redo: () => void;
   reset: (value: T) => void;
@@ -33,13 +33,19 @@ export function useUndoRedo<T>(
     redoStack: [],
   });
 
-  // Set new value and push current to undo stack
-  const set = useCallback((value: T) => {
-    setState((prev) => ({
-      current: value,
-      undoStack: [...prev.undoStack.slice(-(maxHistory - 1)), prev.current],
-      redoStack: [], // Clear redo stack on new action
-    }));
+  // Set new value and push current to undo stack.
+  // Accepts a value or an updater function (like React setState) so concurrent
+  // async operations can apply their changes to the latest state rather than a
+  // stale snapshot captured before their async work began.
+  const set = useCallback((value: T | ((prev: T) => T)) => {
+    setState((prev) => {
+      const next = typeof value === 'function' ? (value as (prev: T) => T)(prev.current) : value;
+      return {
+        current: next,
+        undoStack: [...prev.undoStack.slice(-(maxHistory - 1)), prev.current],
+        redoStack: [], // Clear redo stack on new action
+      };
+    });
   }, [maxHistory]);
 
   // Undo last action
